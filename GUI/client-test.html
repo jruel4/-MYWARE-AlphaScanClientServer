@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>WebSocket demo</title>
+    </head>
+    <body>
+
+		<script>
+			function addMessage(data, color = "black") {
+				var msgList = document.getElementsByTagName('ul')[0],
+                    msg = document.createElement('li'),
+                    txt = document.createTextNode(data);
+				msg.style.color = color;
+                msg.appendChild(txt);
+                msgList.appendChild(msg); }
+			function printOutput(data) { addMessage(" >> " + data, color = "blue"); }
+			function printInput(data) { addMessage(" << " + data, color = "green"); }
+			function printInfo(data) { addMessage(" -- " + data, color = "grey"); }
+			function printError(data) { addMessage(" ** " + data, color = "red"); }
+
+			var _websocket = null;
+			function wsConnect() {
+			  if (_websocket) {
+				_websocket.close(3001);
+			  } else {
+				_websocket = new WebSocket("ws://127.0.0.1:5678/");
+				_websocket.onopen = function() {
+					document.getElementById("connect-button").value = "Disconnect"
+					printInfo('Connected');
+				};
+				_websocket.onmessage = function (event) {
+					printInput(event.data);
+				};
+				_websocket.onclose = function(evt) {
+					document.getElementById("connect-button").value = "Connect";
+					_websocket = null;
+					if (evt.code == 3001) {
+						printInfo("Disconnected")
+					} else {
+						printError("Connection error, code: " + evt.code)
+					}
+				};
+
+				_websocket.onerror = function(evt) {
+				  if (_websocket.readyState == 1) {
+					printMessage('WebSocket normal error: ' + evt.type);
+				  }
+				};
+			  }
+			}
+			
+			function handleClick() {
+				if (!_websocket) {
+					printInfo("WebSocket is not connected");
+				} else {
+					userInput = document.getElementById("u-input").value;
+					document.getElementById("u-input").value = "";
+					printOutput(userInput);
+					_websocket.send(userInput);
+				}
+			}
+
+		</script>
+		<button type="button" id="connect-button" onclick="wsConnect()">Connect</button>
+		<form action="javascript:handleClick();">
+			<input type="text" id="u-input" style="width:600; height:50; font-size:12px">
+		</form>
+		<ul style="list-style: none;"></ul>
+
+    </body>
+</html>
