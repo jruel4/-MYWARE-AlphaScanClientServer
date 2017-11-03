@@ -10,15 +10,25 @@ import logging
 import websockets
 
 from Server.Errors import CommunicationErrors, KILL_SERVER_EXCEPTION
+from Server.AscanCommandSender import AscanCommandSender
 
 class GUICommandReceiver:
     def __init__(self):
-        
-        self.err_handling = None
         self.ws = None
-        
+        self.err_handling = None
+        self.ascan_command_sender = None
+        self.COMMANDS = {}
+
+    async def _FUNCTION_NOT_IMPLEMENTED(self, ws, *args):
+        log_msg = "Function not implemented, got args: " + " | ".join([str(a) for a in args])
+        await self.err_handling.OK(msg=log_msg)
+
+    def _formatAddress(self,add):
+        return str(add[0]) + ":" + str(add[1])
+    
+    def _createCommandMap(self):
         self.COMMANDS = {
-            "DEV_CON" : self._FUNCTION_NOT_IMPLEMENTED,
+            "DEV_CON" : self.ascan_command_sender.connect,
             "DEV_DISCON" : self._FUNCTION_NOT_IMPLEMENTED,
             "BEG_STREAM" : self._FUNCTION_NOT_IMPLEMENTED,
             "STOP_STREAM" : self._FUNCTION_NOT_IMPLEMENTED,
@@ -27,23 +37,21 @@ class GUICommandReceiver:
             "ENTER_AP_MODE" : self._FUNCTION_NOT_IMPLEMENTED,
             "ENTER_WEB_UPDATE_MODE" : self._FUNCTION_NOT_IMPLEMENTED,
             "DEV_RESET" : self._FUNCTION_NOT_IMPLEMENTED,
-        }
-        
-
-    async def _FUNCTION_NOT_IMPLEMENTED(self, ws, *args):
-        log_msg = "Function not implemented, got args: " + " | ".join([str(a) for a in args])
-        await self.err_handling.OK(msg=log_msg)
-
-    def _formatAddress(self,add):
-        return str(add[0]) + ":" + str(add[1])
+        }    
 
     async def connectionHandler(self, ws, path):
+        '''
+        This is functionally our init for the class
+        '''
         logging.info("Receievd connection from: " + self._formatAddress(ws.remote_address))
         
         # Set up error handling etc...
         self.ws = ws
-        self.err_handling = CommunicationErrors(ws)
+        self.err_handling = CommunicationErrors(self.ws) # NOTE: The correct ws is pass in to CommErrors in connectionHandler
+        self.ascan_command_sender = AscanCommandSender(self.err_handling)
         
+        # Create command map
+        self._createCommandMap()
         
         #create future object which will be executed
         command_linstener_task = asyncio.ensure_future(self.commandLinstener(ws))

@@ -30,6 +30,7 @@ class CommunicationErrors:
             "ERR_BAD_COMM"          : ( -8, "Attempted to execute command but did not receive expected output"),
             "ERR_ALREADY_CONNECTED" : ( -9, "Device is already connected, cannot connect again"),
             "ERR_NOT_CONNECTED"     : (-10, "Device us not connected, operation incompatible"),
+            "ERR_OTHER"             : (-99, "Other error"),
         }
             
 
@@ -117,6 +118,14 @@ class CommunicationErrors:
         ''' Device is not connected, operation incompatible '''
         name = inspect.currentframe().f_code.co_name
         logging.warning("FUNC: "  + str(inspect.stack()[1][3]) + " | Devices not connected")
+        if msg: logging.warning("MSG: " + str(msg))
+        await self.ws.send(name)
+        return self.ERRORS[name][0]
+
+    async def ERR_OTHER(self, msg=""):
+        ''' Other error '''
+        name = inspect.currentframe().f_code.co_name
+        logging.warning("FUNC: "  + str(inspect.stack()[1][3]) + " | Other error")
         if msg: logging.warning("MSG: " + str(msg))
         await self.ws.send(name)
         return self.ERRORS[name][0]
