@@ -1,4 +1,4 @@
-from AlphaScanController import AlphaScanDevice
+from Device.AlphaScanController import AlphaScanDevice
 import numpy as np
 
 class DeviceCluster:

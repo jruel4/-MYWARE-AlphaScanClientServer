@@ -96,4 +96,7 @@ class GUICommandReceiver:
         except KeyError:
             await self.err_handling.ERR_BAD_OPCODE(opcode=opcode, msg="Received unknown opcode, message: " + msg)
         
-        return True # Keep running unless we 
+        return True # Keep running unless we
+    
+    def checkArgs(self, function, *args):
+        args_list = function(_

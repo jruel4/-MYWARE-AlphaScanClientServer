@@ -5,14 +5,14 @@ import time
 from threading import Thread, Event
 from pylsl import StreamInfo, StreamOutlet, local_clock
 import random
-from Includes.CommandDefinitions import *
-from Utilities.stats import get_imp
-from Includes.BitPacking import twos_comp
+from Device.Includes.CommandDefinitions import *
+from Device.Utilities.stats import get_imp
+from Device.Includes.BitPacking import twos_comp
 import select
 from matplotlib import pyplot as plt
 import queue
 import numpy as np
-from Modules.TimeSync import TimeSync
+from Device.Modules.TimeSync import TimeSync
 
 class AlphaScanDevice:
     
