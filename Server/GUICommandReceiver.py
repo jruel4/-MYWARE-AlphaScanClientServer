@@ -8,6 +8,7 @@ Created on Wed Oct 18 02:22:29 2017
 import asyncio
 import logging
 import websockets
+import simplejson as json
 
 from Server.Errors import CommunicationErrors, KILL_SERVER_EXCEPTION
 from Server.AscanCommandSender import AscanCommandSender
@@ -17,7 +18,7 @@ class GUICommandReceiver:
         self.ws = None
         self.err_handling = None
         self.ascan_command_sender = None
-        self.COMMANDS = {}
+        self.COMMANDS = {} #created later in connection_handler (ascan_command_sender must have an actual value)
 
     async def _FUNCTION_NOT_IMPLEMENTED(self, ws, *args):
         log_msg = "Function not implemented, got args: " + " | ".join([str(a) for a in args])
@@ -29,14 +30,16 @@ class GUICommandReceiver:
     def _createCommandMap(self):
         self.COMMANDS = {
             "DEV_CON" : self.ascan_command_sender.connect,
-            "DEV_DISCON" : self._FUNCTION_NOT_IMPLEMENTED,
-            "BEG_STREAM" : self._FUNCTION_NOT_IMPLEMENTED,
-            "STOP_STREAM" : self._FUNCTION_NOT_IMPLEMENTED,
+            "DEV_DISCON" : self.ascan_command_sender.disconnect,
+            "BEG_STREAM" : self.ascan_command_sender.beginStream,
+            "STOP_STREAM" : self.ascan_command_sender.stopStream,
             "SYNC_TIME" : self._FUNCTION_NOT_IMPLEMENTED,
             "ENTER_OTA_MODE" : self._FUNCTION_NOT_IMPLEMENTED,
             "ENTER_AP_MODE" : self._FUNCTION_NOT_IMPLEMENTED,
             "ENTER_WEB_UPDATE_MODE" : self._FUNCTION_NOT_IMPLEMENTED,
-            "DEV_RESET" : self._FUNCTION_NOT_IMPLEMENTED,
+            "DEV_RESET" : self.ascan_command_sender.reset,
+            
+            "LOAD_NETWORK_PARAMETERS" : self._FUNCTION_NOT_IMPLEMENTED,
         }    
 
     async def connectionHandler(self, ws, path):
@@ -74,29 +77,31 @@ class GUICommandReceiver:
         Parses input commands from GUI
         '''
         logging.info("RX: " + msg)
-        msg_split = msg.split("|")
-        opcode = msg_split[0]
+        # TODO add error handler if JSON load fails
+        try:
+            json_parsed = json.loads(msg)
+            if not isinstance(json_parsed, dict):
+                raise TypeError
+        except (TypeError, json.JSONDecodeError):
+            return await self.err_handling.ERR_BAD_JSON("Bad JSON received, got: " + msg)
+
+        # Make sure our JSON has an opcode object and it's valid
+        if "OPCODE" not in json_parsed.keys() or not isinstance(json_parsed["OPCODE"], str):
+            return await self.err_handling.ERR_BAD_JSON("Bad JSON received, got: " + msg)
         
+        # We have our opcode now...
+        opcode = json_parsed["OPCODE"]
+        
+        # Make sure it's valid for the commands we have
         if opcode == "KILL_SERVER":
             await self.err_handling.OK(msg="Received kill server opcode, dying...")
             raise KILL_SERVER_EXCEPTION()
             return False
+        elif opcode not in self.COMMANDS.keys():
+            return await self.err_handling.ERR_BAD_OPCODE('Received unknown opcode "' + opcode + '", full message: ' + msg)        
 
-        # Make sure opcode is valid
-        try:
-            command = self.COMMANDS[opcode]
-            logging.info("Received good opcode: " + opcode)
-        
-            # Call command
-            if len(msg_split) > 1:
-                await command(ws, msg_split[1:])
-            else:
-                await command(ws)
-
-        except KeyError:
-            await self.err_handling.ERR_BAD_OPCODE(opcode=opcode, msg="Received unknown opcode, message: " + msg)
-        
-        return True # Keep running unless we
-    
-    def checkArgs(self, function, *args):
-        args_list = function(_
+        # All tests passed, run the command
+        logging.info("Received good opcode: " + opcode)
+        command = self.COMMANDS[opcode]
+        await command(msg) #reparses JSON (TODO: just pass JSON object, no need to reparse/recheck if it was validly loaded)
+        return True # Keep running

@@ -52,8 +52,8 @@ class AlphaScanDevice:
         self.time_beta = 0
         self.time_intervals = list()
         self.time_interval_count = 0
-        self.fifo_queue = Queue.Queue()
-        self.fifo_queue_imp = Queue.Queue()
+        self.fifo_queue = queue.Queue()
+        self.fifo_queue_imp = queue.Queue()
         self.reg_map = [[False for i in range(8)] for j in range(24)]
         
         self.sqwave = list()

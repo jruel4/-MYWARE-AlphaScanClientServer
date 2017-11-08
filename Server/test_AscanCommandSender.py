@@ -11,9 +11,9 @@ import inspect
 import logging
 import sys
 
-from AlphaScanClientServer.Server.Errors import CommunicationErrors
-from AlphaScanClientServer.Server.AscanCommandSender import AscanCommandSender, validate_json
-from AlphaScanClientServer.Stubs.stub_websockets import stub_websockets
+from Server.Errors import CommunicationErrors
+from Server.AscanCommandSender import AscanCommandSender, validate_json
+from Stubs.stub_websockets import stub_websockets
 
 def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
@@ -63,13 +63,16 @@ class ValidateJSONTest(unittest.TestCase):
     def test_badJSON(self):
         self.assertEqual(_run(self._one_arg('GARBAGE_JSON')), self.err_handler.ERRORS["ERR_OTHER"][0])
 
+#    def test_noJSON(self):
+#        self.assertEqual(_run(self._one_arg()), self.err_handler.ERRORS["ERR_OTHER"][0])
+
     # NOTE: NO ERROR WILL BE RAISED IF WE RECEIVE TOO MANY PARAMETERS, only not enough
     # for example, _run(self.one_arg('{"x": 100, "y": 100}')) will not raise any errors
     def test_incorrectNumberOfParameters(self):
         self.assertEqual(_run(self._one_arg('{}')), self.err_handler.ERRORS["ERR_BAD_NUM_PARAMS"][0])
         
     def test_inccorectParameterType(self):
-        pass
+        self.assertEqual(_run(self._one_arg('{}')), self.err_handler.ERRORS["ERR_BAD_NUM_PARAMS"][0])
     def test_incorrectParameterShouldNotBeList(self):
         pass
     def test_incorrectParameterShouldBeList(self):
