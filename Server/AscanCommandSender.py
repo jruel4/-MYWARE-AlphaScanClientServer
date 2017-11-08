@@ -8,7 +8,7 @@ Created on Fri Oct 20 23:25:26 2017
 import asyncio
 import logging
 
-from AlphaScanClientServer.Server.Errors import CommunicationErrors
+from Server.Errors import CommunicationErrors
 from Device.DeviceCluster import DeviceCluster
 
 
@@ -26,7 +26,6 @@ Call decorator as follows:
     For a function which expects two parameters ("c","d") whose values are 1) a list of strings and 2) a single string:
         @validate_json({"c":[str], "d":str})
 '''
-import collections #for checking if iterable in a nice way
 from functools import wraps
 import simplejson as json
 
@@ -49,15 +48,13 @@ def validate_json(expected_parameters, json_error_handler_dec_param = None):
         async def wrapper(self, json_msg, json_error_handler = json_error_handler_dec_param):
             
             if json_error_handler == None:
-                json_error_handler = self.err_handler
-            assert isinstance(json_error_handler, CommunicationErrors), "JSON error handler MUST be instance of CommunicationErrors"
+                json_error_handler = self.err_handling
+            assert isinstance(json_error_handler, CommunicationErrors), "JSON error handler MUST be instance of CommunicationErrors, got:\n\t" + str(type(json_error_handler)) + "\nexpected:\n\t" + str(CommunicationErrors)
 
-
-            # TODO add error handler if JSON load fails
             try:
                 json_parsed = json.loads(json_msg)
-            except json.JSONDecodeError:
-                return await json_error_handler.ERR_OTHER(msg="Bad JSON received, got: " + json_msg)
+            except (TypeError, json.JSONDecodeError):
+                return await json_error_handler.ERR_BAD_JSON("Bad JSON received, got: " + json_msg)
             
             # Log the keys and types we got from parsing JSON
             log_msg = " , ".join([str(k) + ":" + str(type(json_parsed[k])) for k in json_parsed.keys()])
@@ -71,56 +68,50 @@ def validate_json(expected_parameters, json_error_handler_dec_param = None):
 
                 # Parameter not found, raise error
                 if p_name not in json_parsed.keys():
-                    return await json_error_handler.ERR_BAD_NUM_PARAMS(expected="P_NAME="+p_name, received="DID NOT RX")
+                    return await json_error_handler.ERR_BAD_NUM_PARAMS(func.__name__ + ' | expected parameter: "'+p_name + '", did not receive')
 
                 # If expecting a list, verify list and type of elements
                 if isinstance(expected_parameters[p_name], list):
                     expected_type = expected_parameters[p_name][0]
 
                     if not isinstance(json_parsed[p_name], list):
-                        return await json_error_handler.ERR_BAD_PARAM_TYPES(msg=p_name + " expected " + str(list) + " got: " + str(type(json_parsed[p_name])))
+                        return await json_error_handler.ERR_BAD_PARAM_TYPES(func.__name__ + ' | "' + p_name + '" expected type: ' + str(list) + " got: " + str(type(json_parsed[p_name])))
+
                     # Check that all received list elements are of the expected type
                     elif not all(isinstance(x, expected_type) for x in json_parsed[p_name]):
-                        log_msg = "VALIDATE_JSON | " + p_name + " expected list of " + str(expected_type) + " got: " + ",".join([str(type(p)) for p in  json_parsed[p_name]])
-                        return await json_error_handler.ERR_BAD_PARAM_TYPES(msg=log_msg)
+                        return await json_error_handler.ERR_BAD_PARAM_TYPES(func.__name__ + ' | "' + p_name + '" expected list of type: ' + str(expected_type) + " got: " + ",".join([str(type(p)) for p in  json_parsed[p_name]]))
                         
-                        # If all checks passed then add it to our dictionary of parameters to pass to the function
+                    # If all checks passed then add it to our dictionary of parameters to pass to the function
                     else:
-                        parameters_to_wrapped_function.update({p_name, json_parsed[p_name]})
+                        parameters_to_wrapped_function.update({p_name: json_parsed[p_name]})
                 
                 # If not a list, then...
                 else:
                     expected_type = expected_parameters[p_name]
                     if not isinstance(json_parsed[p_name], expected_type):
-                        log_msg = "VALIDATE_JSON | " + p_name + " expected type " + str(expected_type) + " got: " + str(type(json_parsed[p_name]))
-                        return await json_error_handler.ERR_BAD_PARAM_TYPES(msg=log_msg)
+                        return await json_error_handler.ERR_BAD_PARAM_TYPES(func.__name__ + ' | "' + p_name + '" expected type: ' + str(expected_type) + " got: " + str(type(json_parsed[p_name])))
                     else:
                         parameters_to_wrapped_function.update({p_name: json_parsed[p_name]})
 
-            print("params to pass: ", parameters_to_wrapped_function)
-            return func(self, **parameters_to_wrapped_function)
+            logging.info("params to pass: ", parameters_to_wrapped_function)
+            return await func(self, **parameters_to_wrapped_function)
         return wrapper
     return decorator
 
 class AscanCommandSender():
-    def __init__(self, err_handler):
-        self.err_handler = err_handler
+    def __init__(self, err_handling):
+        self.err_handling = err_handling
         self.device_cluster = None
         self.connected = False
         self.is_streaming = False
         self.num_devices = -1
         self.device_ports = []
         
-        args_list = {
-                self.connect : [(list, int)],
-                
-                }
-
     @validate_json({ "ports":[int], })
     async def connect(self, ports=[]):
         if self.connected:
-            return await self.err_handler.ERR_ALREADY_CONNECTED()
-        logging.info("Connecting to " + str(len(ports)) + " on ports: " + ",".join([str(p) for p in ports]))
+            return await self.err_handling.ERR_ALREADY_CONNECTED()
+        logging.info("Connecting to " + str(len(ports)) + " AlphaScans on ports: " + ",".join([str(p) for p in ports]))
 
         dev_tmp = DeviceCluster(port_list = ports)
         if dev_tmp.connect_to_device():
@@ -128,11 +119,11 @@ class AscanCommandSender():
             self.num_devices = len(ports)
             self.device_ports = ports
             self.connected = True
-            return await self.err_handler.OK(msg="Succesfully connected.")
+            return await self.err_handling.OK("Succesfully connected.")
         else:
             # TODO: Create specific error code for this OR give a more detailed error (from dev cluster)
             # TODO: automatically check if AP signal is available.
-            return await self.err_handler.ERR_WHEN_CONNECTING()
+            return await self.err_handling.ERR_WHEN_CONNECTING()
 # =============================================================================
 #             ("Make sure AlphaScan is powered on and wait about 10 " +\
 #             "seconds for it to be allocated an IP Adress by your router. " +\
@@ -142,8 +133,8 @@ class AscanCommandSender():
 
     @validate_json({})
     async def disconnect(self):
-        if self.is_streaming: return await self.err_handler.ERR_STILL_STREAMING()
-        if not self.connected: return await self.err_handler.ERR_NOT_CONNECTED()
+        if self.is_streaming: return await self.err_handling.ERR_STILL_STREAMING()
+        if not self.connected: return await self.err_handling.ERR_NOT_CONNECTED()
 
         logging.info("Disconnecting from AlphaScan(s)...")
 
@@ -151,11 +142,12 @@ class AscanCommandSender():
         self.device_cluster.close_TCP()
         self.connected = False
 
-        self.err_handling.OK(msg="Succesfully disconnected")
+        return await self.err_handling.OK("Succesfully disconnected")
 
+    @validate_json({})
     async def reset(self):
-        if self.is_streaming: return await self.err_handler.ERR_STILL_STREAMING()
-        if not self.connected: return await self.err_handler.ERR_NOT_CONNECTED()
+        if self.is_streaming: return await self.err_handling.ERR_STILL_STREAMING()
+        if not self.connected: return await self.err_handling.ERR_NOT_CONNECTED()
         
         logging.info("Resetting device...")
         
@@ -164,11 +156,12 @@ class AscanCommandSender():
         self.disconnect_from_device()
         logging.debug("Got response from AlphaScan: " + str(r))
 
-        self.err_handling.OK(msg="Succesfully reset")
+        return await self.err_handling.OK(msg="Succesfully reset")
 
+    @validate_json({})
     async def beginStream(self):
-        if self.is_streaming: return await self.err_handler.ERR_STILL_STREAMING()
-        if not self.connected: return await self.err_handler.ERR_NOT_CONNECTED()
+        if self.is_streaming: return await self.err_handling.ERR_STILL_STREAMING()
+        if not self.connected: return await self.err_handling.ERR_NOT_CONNECTED()
 
         logging.info("Begin streaming...")
         begin_stream_string = self.device_cluster.initiate_TCP_stream()
@@ -176,11 +169,13 @@ class AscanCommandSender():
         # TODO validate
         self.is_streaming = True
         logging.debug("Got response from AlphaScan: " + str(begin_stream_string))
-        self.err_handling.OK(msg="Succesfully began streaming")
 
+        return await self.err_handling.OK(msg="Succesfully began streaming")
+
+    @validate_json({})
     async def stopStream(self):
-        if not self.is_streaming: return await self.err_handler.ERR_NOT_STREAMING()
-        if not self.connected: return await self.err_handler.ERR_NOT_CONNECTED()
+        if not self.is_streaming: return await self.err_handling.ERR_NOT_STREAMING()
+        if not self.connected: return await self.err_handling.ERR_NOT_CONNECTED()
 
 
         stat, time, avail, rx, drop = self.device_cluster.terminate_UDP_stream()
@@ -193,9 +188,10 @@ class AscanCommandSender():
                      "availability(?)   | " + str(avail) + "\n" +\
                      "Packets received  | " + str(rx) + "\n" +\
                      "Packets dropped   | " + str(drop))
-        self.err_handling.OK("Succesfully stopped streaming.")
+        return await self.err_handling.OK("Succesfully stopped streaming.")
 
 
+    @validate_json({})
     async def syncTime(self):
         self._Debug.append("beginning sync")
         QMessageBox.information(self, "Synchronizing Time", "Please wait for time sync to complete...")
@@ -231,16 +227,26 @@ class AscanCommandSender():
                 key = "[drift(uS/S), len_offsets, drift_reasonable]\n"
                 QMessageBox.information(self, "Sync Results", key+str(r))
 
+    @validate_json({})
     async def enterOTA(self):
+        if self.is_streaming: return await self.err_handling.ERR_STILL_STREAMING()
+        if not self.connected: return await self.err_handling.ERR_NOT_CONNECTED()
+        
         r = self.device_cluster.generic_tcp_command_BYTE('GEN_start_ota') 
-        msgBox = QMessageBox()
-        if 'OTA' in r:#TODO add response into firmware
+        self.disconnect_from_device()
+
+        #TODO add response into firmware
+        if 'OTA' in r:
             msgBox.setText("SUCCESS")
         else:
             msgBox.setText(r)
-        msgBox.exec_()
-        self.disconnect_from_device()
+
+
+    @validate_json({})
     async def enterAP(self):
+        if self.is_streaming: return await self.err_handling.ERR_STILL_STREAMING()
+        if not self.connected: return await self.err_handling.ERR_NOT_CONNECTED()
+        
         r = self.device_cluster.generic_tcp_command_BYTE('GEN_start_ap') 
         msgBox = QMessageBox()
         if 'ap_mode' in r:#TODO add response into firmware
@@ -249,7 +255,12 @@ class AscanCommandSender():
             msgBox.setText(r)
         msgBox.exec_()
         self.disconnect_from_device()
+
+    @validate_json({})
     async def enterWebUpdate(self):
+        if self.is_streaming: return await self.err_handling.ERR_STILL_STREAMING()
+        if not self.connected: return await self.err_handling.ERR_NOT_CONNECTED()
+        
         r = self.device_cluster.generic_tcp_command_BYTE('GEN_web_update') 
         msgBox = QMessageBox()
         if 'web_update' in r:#TODO add response into firmware
@@ -259,222 +270,13 @@ class AscanCommandSender():
         msgBox.exec_()
         self.disconnect_from_device()
         
-        
-# =============================================================================
-#         
-# class GeneralTab(QWidget):
-#     
-#     # Define Init Method
-#     def __init__(self,Device, Debug):
-#         super(GeneralTab, self).__init__(None)
-#         
-#         #######################################################################
-#         # Basic Init ##########################################################
-#         #######################################################################
-#         
-#         self._Device = Device      
-#         self._Debug = Debug
-#         
-#         # Define status vars
-#         self.Connected = False
-#         self.Streaming = False
-#         
-#         # Set layout
-#         self.layout = QGridLayout()
-#         self.setLayout(self.layout) # Does it matter when I do this?
-#         
-#         # Set layout formatting
-#         self.layout.setAlignment(Qt.AlignTop)
-#         #TODO self.layout.setColumnStretch(3,1)
-#         # TODO prevent horizontal stretch
-#         
-#         #######################################################################
-#         # Status Row ##########################################################
-#         #######################################################################
-#         
-#  
-#         
-#         self.Button_Disconnect.clicked.connect(self.disconnect_from_device)   
-#         
-#         #######################################################################
-#         # Accelerometer Row ###################################################
-#         #######################################################################
-#         
-#         # Connect Accel Status button signals to slots
-#         self.Button_RefreshAccelStatus.clicked.connect(self.update_accel_status)
-#         
-#         #######################################################################
-#         # Power Management Row ################################################
-#         #######################################################################
-# 
-#         # Connect Power Manage button signals to slots
-#         self.Button_RefreshPowerStatus.clicked.connect(self.update_power_status)
-#         
-#         #######################################################################
-#         # ADC Row #############################################################
-#         #######################################################################
-#         
-# 
-#         # Connect ADC signal to slots
-#         self.Button_RefreshAdcStatus.clicked.connect(self.update_adc_status)
-#         
-#         self.Button_AdcBeginStream.clicked.connect(self.begin_streaming_tcp)
-#         self.Button_AdcStopStream.clicked.connect(self.stop_streaming)
-#         
-#         # Add time sync button
-#         self.Button_SyncTime.clicked.connect(self.synchronize_time)
-#         
-#         #######################################################################
-#         # OTA Mode ############################################################
-#         #######################################################################
-#         self.Button_OtaMode.clicked.connect(self.enter_ota_mode)
-#         
-#         #######################################################################
-#         # AP Mode #############################################################
-#         #######################################################################
-#         self.Button_ApMode.clicked.connect(self.enter_ap_mode)
-#         
-#         #######################################################################
-#         # Update Command Map ##################################################
-#         #######################################################################
-# 
-#         self.Button_UpdateCmdMap.clicked.connect(self.update_command_map)
-#         
-#         #######################################################################
-#         # Update UDP Delay Value ##############################################
-#         #######################################################################
-#         self.Button_SetUdpDelayVal.clicked.connect(self.update_udp_delay)
-#         
-#         #######################################################################
-#         # Reset Device ########################################################
-#         #######################################################################
-#         self.Button_ResetDevice.clicked.connect(self.reset_device)
-#         
-#         #######################################################################
-#         # Auto Connect Enable #################################################
-#         #######################################################################
-#         self.Button_WebUpdateMode.clicked.connect(self.enter_web_update_mode)
-#         
-#     @Slot()
-#     def update_accel_status(self):
-#         if self.Streaming or not self.Connected:
-#             self.Text_AccelStatus.setText("ILLEGAL")
-#             return
-#         accel_status_string = self._Device.generic_tcp_command_BYTE("ACC_get_status")
-#         self.Text_AccelStatus.setText(accel_status_string)
-#         
-#     
-#     @Slot()
-#     def stop_streaming(self):
-# 
-#         
-#     @Slot()
-#     def stop_streaming_tcp(self):
-#         if not self.Streaming or not self.Connected:
-#             self.Text_GeneralMessage.setText("ILLEGAL: Streaming must be true, Connected must be true")
-#             return
-#         self._Device.terminate_TCP_stream()
-#         self.Streaming = False # TODO validate
-#         self.Text_AdcStreamStatus.setText("Stopped streaming")
-#         
-#     @Slot()
-#     def stop_streaming_tcp_X(self):
-#         r = self._Device.getPdataSize()
-#         self.Text_AdcStreamStatus.setText("Size pData: "+str(r))
-#   
-#         
-#     @Slot()
-#     def clear_gen_msg(self):
-#         self.Text_GeneralMessage.setText("")
-#         
-#     @Slot()
-# 
-#         
-#     @Slot()
-# 
-#         
-#     @Slot()
-# 
-#     
-#     @Slot()
-#     def update_command_map(self):
-#         r = self._Device.update_command_map()
-#         msgBox = QMessageBox()
-#         if 'map_command' in r:#TODO add response into firmware
-#             msgBox.setText("SUCCESS")
-#         else:
-#             msgBox.setText(r)
-#         msgBox.exec_()
-#         
-#     @Slot()
-#     def update_udp_delay(self):
-#         r = self._Device.set_udp_delay(int(self.Line_UdpDelayVal.text()))
-#         msgBox = QMessageBox()
-#         msgBox.setText(r)
-#         msgBox.exec_()
-#         
-#     @Slot()
-# 
-#         
-#     @Slot()
-#     def disable_auto_connect(self):
-#         self._Debug.append("Disabling auto connect to save tcp buffer response")
-#         self.Check_AutoConnectEnable.setCheckState(Qt.CheckState.Unchecked)
-#     
-#     @Slot()
-#     def auto_connect(self):
-#         if self.Check_AutoConnectEnable.isChecked() and not self.Streaming:
-#             if not self.Connected:
-#                 # connect routine 
-#                 if self._Device.listen_for_device_beacon():
-#                     self._Debug.append("Device found, attempting to connect...")
-#                     self.connect_to_device()
-#                 else:
-#                     # TODO check for Access Point Availability
-#                     pass
-#             else:
-#                 # hearbeat routine, send ALIVE? query, and if no answer then disconnect_from_device
-#                 # TODO This has risk of colliding with user actions, consider using an IDLE flag
-#                 if self.heartbeatIntervalCounter > 40: 
-#                     # reset counter and send alive query
-#                     self.heartbeatIntervalCounter = 0
-#                     r = self._Device.generic_tcp_command_BYTE("GEN_alive_query")
-#                     if "ALIVE_ACK" not in r:
-#                         self.heartbeatFailCounter += 1
-#                     else:
-#                         self.heartbeatFailCounter = 0
-#                         
-#                     if self.heartbeatFailCounter > 1:
-#                         self.disconnect_from_device()
-#                         self.heartbeatFailCounter = 0
-#                 else:
-#                     self.heartbeatIntervalCounter += 1
-#                     
-#         elif self.Check_AutoConnectEnable.isChecked() and self.Streaming:
-#             #TODO check for stream validity
-#             pass
-#         
-#     @Slot()
-#     def read_debug_log(self):
-#         if self.Check_DebugLogEnable.isChecked() and self.Connected and not self.Streaming:
-#             r = self._Device.read_debug_port()
-#             if r:
-#                 self._Debug.append(r)
-#     
-#     @Slot()
-#     def toggle_debug_state(self):
-#         if self.Check_DebugLogEnable.isChecked():
-#             if self._Device.open_debug_port():
-#                 self._Debug.append("Debug Enabled")
-#             else:
-#                 self._Debug.append("Debug Enable Failed")
-#         else:
-#             if self._Device.close_debug_port():
-#                 self._Debug.append("Debug Disabled")
-#             else:
-#                 self._Debug.append("Debug Disable Failed")
-#         
-#             
-#     @Slot()
-# 
-# =============================================================================
+if __name__ == "__main__":
+    
+    def _run(coro):
+        return asyncio.get_event_loop().run_until_complete(coro)
+
+    from AlphaScanClientServer.Stubs.stub_websockets import stub_websockets
+    ws = stub_websockets()
+    e = CommunicationErrors(ws)
+    ascan = AscanCommandSender(e)
+    _run(ascan.connect("{\"ports\":[50007]}"))

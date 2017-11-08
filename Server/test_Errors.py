@@ -24,8 +24,8 @@ class ErrorsTestCase(unittest.TestCase):
 
         # Get all of the member names and functions in the error class        
         self.err_members = inspect.getmembers(self.err, predicate=inspect.ismethod)
-        self.err_member_names = [name_str for name_str,func in self.err_members if name_str != "__init__"]
-        self.err_member_functions = [func for name_str,func in self.err_members if name_str != "__init__"]
+        self.err_member_names = [name_str for name_str,func in self.err_members if name_str[0] != "_"] # underscored methods represent internal functions
+        self.err_member_functions = [func for name_str,func in self.err_members if name_str[0] != "_"]
 
     def test_ErrorCodeListContainsAllErrorFunctions(self):        
         # Make sure the length of the list of members is equal to the length of the ERRORS array
@@ -37,15 +37,18 @@ class ErrorsTestCase(unittest.TestCase):
             
     def test_ErrorFunctionsSendCorrectErrorCodes(self):
         for name, func in self.err_members:
-            if name != "__init__":
+            if name[0] != "_": #exclude internal class methods
                 _run(func()) #send error code to dummy WS object
                 self.assertEqual(name, self.ws.last_sent)
     
     def test_ErrorFunctionsReturnCorrectErrorCodes(self):
         for name, func in self.err_members:
-            if name != "__init__":
+            if name[0] != "_":
                 self.assertEqual(self.err.ERRORS[name][0], _run(func()))
-        
+                
+    def test_ErrorLogLevelsAreValid(self):
+        for v in self.err.ERRORS.values():
+            self.assertIn(v[1], self.err.LOG_LEVELS.keys())
             
 if __name__ == "__main__":
     logging.basicConfig( stream=sys.stderr )
