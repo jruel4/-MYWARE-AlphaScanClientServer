@@ -10,14 +10,17 @@ import logging
 import websockets
 import simplejson as json
 
-from Server.Errors import CommunicationErrors, KILL_SERVER_EXCEPTION
-from Server.AscanCommandSender import AscanCommandSender
+from Server.CommandServerResponses import CommandServerResponses, KILL_SERVER_EXCEPTION
+from Server.CommandServerAlphaScanInterface import AscanCommandSender
 
-class GUICommandReceiver:
+class CommandServer:
     def __init__(self):
         self.ws = None
         self.err_handling = None
+
+        # This send the actual commands to the AlphaScan and manages multiple devices
         self.ascan_command_sender = None
+
         self.COMMANDS = {} #created later in connection_handler (ascan_command_sender must have an actual value)
 
     async def _FUNCTION_NOT_IMPLEMENTED(self, ws, *args):
@@ -33,7 +36,7 @@ class GUICommandReceiver:
             "DEV_DISCON" : self.ascan_command_sender.disconnect,
             "BEG_STREAM" : self.ascan_command_sender.beginStream,
             "STOP_STREAM" : self.ascan_command_sender.stopStream,
-            "SYNC_TIME" : self._FUNCTION_NOT_IMPLEMENTED,
+            "SYNC_TIME" : self.ascan_command_sender.syncTime,
             "ENTER_OTA_MODE" : self._FUNCTION_NOT_IMPLEMENTED,
             "ENTER_AP_MODE" : self._FUNCTION_NOT_IMPLEMENTED,
             "ENTER_WEB_UPDATE_MODE" : self._FUNCTION_NOT_IMPLEMENTED,
@@ -50,7 +53,7 @@ class GUICommandReceiver:
         
         # Set up error handling etc...
         self.ws = ws
-        self.err_handling = CommunicationErrors(self.ws) # NOTE: The correct ws is pass in to CommErrors in connectionHandler
+        self.err_handling = CommandServerResponses(self.ws) # NOTE: The correct ws is pass in to CommErrors in connectionHandler
         self.ascan_command_sender = AscanCommandSender(self.err_handling)
         
         # Create command map

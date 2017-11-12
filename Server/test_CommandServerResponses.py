@@ -9,9 +9,10 @@ import asyncio
 import unittest
 import inspect
 import logging
-import sys
 
-from AlphaScanClientServer.Server.Errors import CommunicationErrors
+import simplejson as json
+
+from AlphaScanClientServer.Server.CommandServerResponses import CommandServerResponses
 from AlphaScanClientServer.Stubs.stub_websockets import stub_websockets
 
 def _run(coro):
@@ -20,7 +21,7 @@ def _run(coro):
 class ErrorsTestCase(unittest.TestCase):
     def setUp(self):
         self.ws = stub_websockets()
-        self.err = CommunicationErrors(self.ws)
+        self.err = CommandServerResponses(self.ws)
 
         # Get all of the member names and functions in the error class        
         self.err_members = inspect.getmembers(self.err, predicate=inspect.ismethod)
@@ -36,10 +37,14 @@ class ErrorsTestCase(unittest.TestCase):
             self.assertIn(n, self.err.ERRORS)
             
     def test_ErrorFunctionsSendCorrectErrorCodes(self):
+        data = [None, "", 1, [1],["1"],{},True]
+        data_idx = 0
         for name, func in self.err_members:
             if name[0] != "_": #exclude internal class methods
-                _run(func()) #send error code to dummy WS object
-                self.assertEqual(name, self.ws.last_sent)
+                _run(func(data=data[data_idx])) #send error code to dummy WS object
+                correct_response = json.dumps({"RESP":name, "CODE":self.err.ERRORS[name][0], "MSG":"","DATA":data[data_idx]})
+                self.assertEqual(correct_response, self.ws.last_sent)
+                data_idx = (data_idx + 1) % len(data) 
     
     def test_ErrorFunctionsReturnCorrectErrorCodes(self):
         for name, func in self.err_members:
@@ -51,6 +56,5 @@ class ErrorsTestCase(unittest.TestCase):
             self.assertIn(v[1], self.err.LOG_LEVELS.keys())
             
 if __name__ == "__main__":
-    logging.basicConfig( stream=sys.stderr )
-    logging.getLogger( "SomeTest.testSomething" ).setLevel( logging.INFO )
+    logging.basicConfig(level=logging.DEBUG)
     unittest.main()

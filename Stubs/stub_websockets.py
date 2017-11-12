@@ -20,5 +20,5 @@ class stub_websockets:
         if not (isinstance(msg, str) or isinstance(msg, bytes)):
             logging.error("Error, message must either be string or bytes")
             raise TypeError
-        logging.info("TST SEND: ", msg)
+        logging.info("TST SEND: " + msg)
         self.last_sent = msg

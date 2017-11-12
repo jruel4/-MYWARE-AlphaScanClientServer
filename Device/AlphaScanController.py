@@ -14,9 +14,25 @@ import queue
 import numpy as np
 from Device.Modules.TimeSync import TimeSync
 
+# JCR - preferred method of outputting to console
+import logging
+
+# JCR - used to send data through websockets
+import websocket as WSClient
+
+# JCR - for sending JSON objects through WS
+import simplejson as json
+
 class AlphaScanDevice:
     
-    def __init__(self, portno):
+    def __init__(self, portno, stream_router_ip=None, stream_router_port=None):
+        
+        ###############################################################################
+        # Stream Router Settings
+        ###############################################################################
+        self.stream_router_ip = stream_router_ip
+        self.stream_router_port = stream_router_port
+        self.errs = None
 
         ###############################################################################
         # TCP Settings
@@ -89,6 +105,8 @@ class AlphaScanDevice:
         
         # create sync object
         self.ts = TimeSync()
+    
+    def tobyte(self, x): return bytes([x])
         
     def close_event(self):
         self.DEV_streamActive.clear()
@@ -247,7 +265,7 @@ class AlphaScanDevice:
                     #self.inbuf += [ord(self.data)] # #TODO this is suspect since ord should only take 1 character, and will fill quick
                     
                     # Populate fresh channel data into self.mysample
-                    for j in xrange(8):
+                    for j in range(8):
                         deviceData[j] = [self.data[diff+(j*3):diff+(j*3+3)]] 
                         val = 0
                         for i in range(3):
@@ -360,7 +378,7 @@ class AlphaScanDevice:
                     #self.inbuf += [ord(self.data)] # #TODO this is suspect since ord should only take 1 character, and will fill quick
                     
                     # Populate fresh channel data into self.mysample
-                    for j in xrange(8):
+                    for j in range(8):
                         deviceData[j] = [current_data[(j*3):(j*3+3)]] 
                         val = 0
                         for s,n in list(enumerate(deviceData[j][0])):
@@ -521,7 +539,10 @@ class AlphaScanDevice:
         self.LSL_Thread = Thread(target=self.udp_ack_1_thread)
         self.LSL_Thread.start()
         self.DEV_streamActive.set()  
-        self.FEEDER_THREAD = Thread(target=self.lsl_feeder_thread)
+
+#        self.FEEDER_THREAD = Thread(target=self.lsl_feeder_thread)
+#        self.FEEDER_THREAD = Thread(target=self.stream_router_feeder_thread)
+        self.FEEDER_THREAD = Thread(target=self.stream_router_ws_feeder_thread)
         self.FEEDER_THREAD.start()
         self.IMP_THREAD = Thread(target=self.imp_thread)
         self.IMP_THREAD.start()
@@ -644,7 +665,7 @@ class AlphaScanDevice:
         # send broadcast beacon for device to discover this host
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        s.sendto('alpha_scan_beacon_xbx_'+str(self.COMM_PORT)+'_xex',('255.255.255.255',self.UDP_PORT)) #TODO this subnet might not work on all LAN's (see firmware method)
+        s.sendto(('alpha_scan_beacon_xbx_'+str(self.COMM_PORT)+'_xex').encode(),('255.255.255.255',self.UDP_PORT)) #TODO this subnet might not work on all LAN's (see firmware method)
         # send desired TCP port in this beacon 
         s.close();
         
@@ -703,7 +724,7 @@ class AlphaScanDevice:
     
     def unpack_data(data):
         deviceData = [list() for i in range(8)]
-        for j in xrange(8):
+        for j in range(8):
             deviceData[j] = [data[3+(j*3):3+(j*3+3)]] 
     
             val = 0
@@ -792,7 +813,7 @@ class AlphaScanDevice:
             header = self.total_buf[(packet_size*i): (packet_size*i) + 4]
             if ord(header[0]) != 0x7f or ord(header[1]) != 0x7f or ord(header[2]) != 0x7f or ord(header[3]) != 0x7f:
                 self.over_loops += 1
-            for j in xrange(8):
+            for j in range(8):
                 deviceData[j] = [current_data[(j*3):(j*3+3)]] 
                 val = 0
                 for s,n in list(enumerate(deviceData[j][0])):
@@ -831,8 +852,10 @@ class AlphaScanDevice:
         self.sock = sock
         #JCR
         self.raw_vals = list()
+        #JCR REMOVE THIS!
+        self.resps = []
         def msg(c,token=0x00):
-            return chr(c)+'_'.encode('utf-8')+chr(0x00)     
+            return bytes([c,ord('_'),0x00])     
         def get_newest_ctr(sock):
             valid = 0
             nctr = -1
@@ -841,14 +864,16 @@ class AlphaScanDevice:
             while 1:
                 try:
                     data = sock.recv(1400)
-                    nctr = ord(data[0])
-                    sndr_rc = ord(data[2])
+                    nctr = data[0]
+                    sndr_rc = data[2]
                     valid = len(data)
                 except socket.timeout:
+                    self.resps += ["TIMED"]
                     break
                 except socket.error as e:
                 # A non-blocking socket operation could not be completed immediately
                     if e.errno == 10035: 
+                        self.resps += ["BROKED"]
                         break
                     elif e.errno == 10054:
                         pass #TODO This is not debugged - thrown if UDP on device not ready
@@ -860,31 +885,31 @@ class AlphaScanDevice:
                         raise e  
             return nctr,valid,sndr_rc,data
         def get_queue_size(data):
-            msb = ord(data[1])
-            lsb = ord(data[2])
+            msb = data[1]
+            lsb = data[2]
             return ((msb << 8) | lsb)
         def get_heap_size(data):
-            msb = ord(data[3])
-            csb = ord(data[4])    
-            lsb = ord(data[5])
+            msb = data[3]
+            csb = data[4]
+            lsb = data[5]
             return ((msb << 16) | (csb << 8) | lsb)
         def parse_and_push(data):
             deviceData = [list() for i in range(8)]
             mysamples = [[0 for i in range(8)] for j in range(57)]
             timestamp_base = 0            
             for idx in range(6,14):
-                timestamp_base |= ord(data[idx]) << (((idx-6)) * 8)
+                timestamp_base |= data[idx] << (((idx-6)) * 8)
             self.raw_vals += [data[x] for x in range(6,14)]
             for i in range(57):
                 #TODO update calculation below for variable sample rates
                 # i.e. 4000 = 1000/250 * 1000 so adjust 250 to variable srate
                 timestamp_inc = timestamp_base + (i*4000) # assuming 4,000 microsecond elapse b/w samples
-                for j in xrange(8):
+                for j in range(8):
                     deviceData[j] = [data[(24+24*i)+(j*3):(24+24*i)+(j*3+3)]] 
                     val = 0
                     for s,n in list(enumerate(deviceData[j][0])):
                         try:
-                            val ^= ord(n) << ((2-s)*8)
+                            val ^= n << ((2-s)*8)
                         except ValueError as e:
                             print("value error",e)
                         except TypeError as e:
@@ -919,6 +944,7 @@ class AlphaScanDevice:
             sock.sendto(msg(ctr), (UDP_IP, UDP_PORT))                          # Send ack for data block with id==ctr
             time.sleep(sleep)                                                  # Give device time to respond 
             nctr,valid,x,d = get_newest_ctr(sock)                              # Get most recent received message
+            self.resps += [nctr,valid,x,d]
             if not valid: self.miss+=1;                                        # If rx message not valid, restart
             elif nctr != (ctr+1)%256: ctr=nctr;self.skip+=1                    # TODO(analyze) If rx message not expected count skip 
             else:
@@ -940,7 +966,7 @@ class AlphaScanDevice:
         time.sleep(0.100)
         try:
             for i in range(3):
-                sock.sendto(chr(0xff)*3, (UDP_IP, UDP_PORT))  
+                sock.sendto(bytes([0xff]*3), (UDP_IP, UDP_PORT))  
             sock.close()
         except socket.error as e:
             if e.errno == 9:
@@ -958,21 +984,171 @@ class AlphaScanDevice:
         UDP_IP = self.UDP_IP_UNI
         UDP_PORT = self.COMM_PORT
         try:
-            self.sock.sendto(chr(0xff)*3,(UDP_IP,UDP_PORT))
+            self.sock.sendto(bytes([0xff]*3),(UDP_IP,UDP_PORT))
             self.sock.close()
         except AttributeError: # TODO handle sock not exist exception and create as below
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET,socket.SO_RCVBUF,8192)
             sock.bind(('',UDP_PORT))
             for i in range(3):
-                sock.sendto(chr(0xff)*3,(UDP_IP,UDP_PORT))
+                sock.sendto(bytes([0xff]*3),(UDP_IP,UDP_PORT))
             sock.close()
         except socket.error as e:
             if e.errno == 9: #bad file descriptor, I.e. was already closed...
                 pass
             else:
                 raise e
+    
+    def stream_router_ws_feeder_thread(self):
+        if not (self.stream_router_ip and self.stream_router_port):
+            self.lsl_feeder_thread()
+        else:
+            self.t_data = list()
+            self.t_offsets=list()
+            time.sleep(0.500) # was at 0.300
+            ws = None
             
+            retries = 0
+
+            # Try connecting to stream router
+            while self.DEV_streamActive.is_set():
+                if not ws:
+                    try:
+                        ws = WSClient.create_connection(
+                            "ws://" + self.stream_router_ip + ":" + str(self.stream_router_port),
+#                            sockopt=((socket.IPPROTO_TCP, socket.TCP_NODELAY),),
+                            timeout=0.1)
+                        logging.info("Connection to stream server created")
+                        init_msg = {"ALPHASCAN": {"portno":self.COMM_PORT}}
+                        ws.send(json.dumps(init_msg).encode())
+                        
+                    except socket.timeout as e:
+                        logging.error("Webocket client couldn't connect, timed out, retrying...")
+                        time.sleep(1)
+                        ws = None
+                    except Exception as e:
+                        print(e)
+                else:
+                    d = self.fifo_queue.get()
+                    self.fifo_queue_imp.put(list(d[0])) # for imp thread
+                    # Convert from device time to host time
+                    device_timestamp = d[1] 
+                    # NOTE: This returns 1D numpy array - NUMPY DOESN'T PLAY NICE WITH JSON!
+                    host_timestamp = self.ts.calculate_offset(device_timestamp)
+                    self.t_offsets += [[device_timestamp,host_timestamp,local_clock()]]
+                    data_msg = {"TIMESTAMP": host_timestamp[0], "DATA": d[0]}
+
+                    # Try to send data to server, break after 5 tries
+                    while self.DEV_streamActive.is_set():
+                        try:
+                            ws.send(json.dumps(data_msg))
+                            retries = 0
+                        except WSClient.WebSocketTimeoutException as e:
+                            logging.warning("Sending data to server timed out, retrying...")
+                            retries += 1
+                        except Exception as e:
+                            logging.critial("Unkown exception occurred when sending:\n\t", str(e))
+                            retries += 1
+                        finally:
+                            if retries > 5:
+                                logging.error("Couldn't send data to server, closing connection.")
+                                if ws:
+                                    ws.close()
+                                ws = None
+
+# =============================================================================
+#                     # If we want to send binary in the future this is how ir should be done 
+#                     ws.send(d[0], opcode=WSClient.ABNF.OPCODE_BINARY)
+# =============================================================================
+                
+                    self.t_data += [d[0]]
+                    self.local_qsize += [self.fifo_queue.qsize()]
+                    if(self.fifo_queue.qsize() > 250):
+                        time.sleep(0.002) # was 0.004
+                    else:
+                        time.sleep(0.004) # was 0.004
+
+
+        
+        
+        
+    
+    def stream_router_feeder_thread(self):
+        if not (self.stream_router_ip and self.stream_router_port):
+            self.lsl_feeder_thread()
+        else:
+            self.t_data = list()
+            self.t_offsets=list()
+            time.sleep(0.500) # was at 0.300
+            logging.info("Attempting to connect to stream router server, ip: " + self.stream_router_ip + " port: " + str(self.stream_router_port))
+            retry_time = 0.5
+            sr_sock = None
+
+            # Try connecting to stream router
+            while self.DEV_streamActive.is_set():
+                if not sr_sock:
+                    try:
+                        sr_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sr_sock.connect((self.stream_router_ip, self.stream_router_port))
+                        logging.info("Succesfully connected to stream router server")
+                        import simplejson as json
+
+                        init_msg = {"ALPHASCAN": {"portno":self.COMM_PORT}}
+                        sr_sock.send(json.dumps(init_msg).encode())
+                        sr_sock.settimeout(0.1)
+                        retries = 10
+                        ack=""
+                        while self.DEV_streamActive.is_set():
+                            # Check if socket has data
+                            try:
+                                ack = sr_sock.recv(3)
+                                self.errs = ack
+                            except socket.timeout:
+                                pass
+                            # Check that we received something, if it's not "ACK" then restart comms
+                            if ack and "ACK" in ack.decode():
+                                logging.info("Received ack")
+                                sr_sock.setblocking(False)
+                                break
+                            elif ack and "ACK" not in ack.decode():
+                                logging.error("Did not receive ack from stream router server, restarting communications")
+                                sr_sock.close()
+                                sr_sock = None
+                                break
+                            else:
+                                # We didn't receive anything, try again
+                                retries -= 1
+
+                            # If we're out of retries then restart the communication process
+                            if retries < 1:
+                                logging.error("Did not receive any data from stream router server, restarting communications")
+                                sr_sock.close()
+                                sr_sock = None
+                                break
+                        continue
+                    except socket.error as e:
+                        logging.error("Error connecting to stream router server, got error: " + str(e.errno) + ", trying again in: " + str(retry_time))
+                        logging.debug("Full socket error object: \n" + str(e))
+                        time.sleep(retry_time)
+                        retry_time = min([retry_time+0.5, 5])
+                        sr_sock = None
+                        continue
+                
+                d = self.fifo_queue.get()
+                self.fifo_queue_imp.put(list(d[0])) # for imp thread
+                # Convert from device time to host time
+                device_timestamp = d[1] 
+                host_timestamp = self.ts.calculate_offset(device_timestamp)
+                self.t_offsets += [[device_timestamp,host_timestamp,local_clock()]]
+                sr_sock.send(d[0])
+                
+                self.t_data += [d[0]]
+                self.local_qsize += [self.fifo_queue.qsize()]
+                if(self.fifo_queue.qsize() > 250):
+                    time.sleep(0.002) # was 0.004
+                else:
+                    time.sleep(0.004) # was 0.004
+        
     def lsl_feeder_thread(self):
         self.t_data = list()
         self.t_offsets=list()
@@ -1032,16 +1208,22 @@ class AlphaScanDevice:
             idx = 0
             
             
-    def time_sync(self):      
+    def time_sync(self, callback_fn):
+        logging.info("Beginning sync on device w/ portno: " + str(self.COMM_PORT))
         self.generic_tcp_command_OPCODE(0x7)
         time.sleep(1.0)
-        return self.ts.sync(self.UDP_IP_UNI,self.COMM_PORT - 50007)
+        return self.ts.sync(self.UDP_IP_UNI,self.COMM_PORT - 50007, callback_fn)
         
             
             
           
           
-          
-          
-          
-          
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+    a = AlphaScanDevice(50007, "localhost", 5678)
+    a.connect_to_device()
+    a.time_sync(lambda _,__: a.initiate_TCP_stream())
+    def kk(x = 0):
+        a.terminate_UDP_stream()
+        if x:
+            a.close_TCP()

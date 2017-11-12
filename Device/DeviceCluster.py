@@ -165,7 +165,7 @@ class DeviceCluster:
         for i in range(self.num_devices):
             r[i] = self.dev[i].connect_to_device()
         print(r)
-        return True
+        return r
         
     def set_udp_delay(self, delay):
         for d in self.dev:
@@ -204,8 +204,7 @@ class DeviceCluster:
             res['skip'] += [np.mean(d.skip)]
         return res
           
-    def time_sync(self):
-        r = []
-        for d in self.dev:
-            r += [d.time_sync()]
-        return r
+    # Returns array where each element is if threads succesfully started
+    def time_sync(self, callback_fn):
+        return [d.time_sync(callback_fn) for d in self.dev]
+            
