@@ -46,7 +46,7 @@ from Server.CommandServerResponses import KILL_SERVER_EXCEPTION
 
 # Set up logging
 LOG_FORMAT_NORMAL_DETAIL = '%(asctime)s|%(levelname)s|%(message)s'
-LOG_FORMAT_HIGH_DETAIL = '%(asctime)s|%(levelname)8s|%(filename)20s.%(lineno)4d|%(funcName)20s|%(message)s'
+LOG_FORMAT_HIGH_DETAIL = '%(asctime)s|%(levelname).1s|%(filename).10s@%(lineno).4d|%(funcName).10s\n\t%(message)s'
 
 # PARAMETERS
 USE_LOGFILE = False
@@ -56,13 +56,13 @@ if USE_LOGFILE:
     logfile = os.path.join(".", datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + '.log')
     logging.basicConfig(filename=logfile,level=logging.DEBUG, format=LOGGING_FORMAT,)
 else:
-    logging.basicConfig(level=logging.DEBUG, format=LOGGING_FORMAT,)
+    logging.basicConfig(level=logging.INFO, format=LOGGING_FORMAT,)
 
 commandServer = CommandServer()
 
 # Start up command receiver
 # This starts a websockets server - each new connection instantiates an instance of "handler"
-start_server = websockets.serve(commandServer.connectionHandler, '127.0.0.1', 5678)
+start_server = websockets.serve(commandServer.connectionHandler, '127.0.0.1', 50505)
 
 event_loop = asyncio.get_event_loop()
 try:
@@ -73,4 +73,4 @@ except KeyboardInterrupt as e:
 except KILL_SERVER_EXCEPTION:
     logging.info("Killing server...")
 finally:
-    event_loop.close()
+    start_server.server.close()

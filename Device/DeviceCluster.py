@@ -8,9 +8,9 @@ class DeviceCluster:
     methods, it should go through the Device cluster instead.
     """
     
-    def __init__(self, port_list = [50007]):
+    def __init__(self, port_list = [50007], stream_router_ip=None, stream_router_port=None):
         self.num_devices = len(port_list)
-        self.dev = [AlphaScanDevice(i) for i in port_list]
+        self.dev = [AlphaScanDevice(i, stream_router_ip, stream_router_port) for i in port_list]
     
     def open_debug_port(self):
         for d in self.dev:

@@ -1009,6 +1009,8 @@ class AlphaScanDevice:
             ws = None
             
             retries = 0
+            
+            self.ws_uid = None
 
             # Try connecting to stream router
             while self.DEV_streamActive.is_set():
@@ -1019,8 +1021,16 @@ class AlphaScanDevice:
 #                            sockopt=((socket.IPPROTO_TCP, socket.TCP_NODELAY),),
                             timeout=0.1)
                         logging.info("Connection to stream server created")
-                        init_msg = {"ALPHASCAN": {"portno":self.COMM_PORT}}
-                        ws.send(json.dumps(init_msg).encode())
+                        init_msg = {"ASCAN":
+                            {"ASCAN_IP":self.UDP_IP_UNI,
+                             "ASCAN_PORT":self.COMM_PORT,
+                             "ASCAN_CH":["NONE"]*8,
+                             "ASCAN_MASTER":True
+                             }
+                            }
+                        ws.send(json.dumps(init_msg))
+                        self.ws_uid = json.loads(ws.recv())["UID"]
+                        logging.info("Got UID: " + str(self.ws_uid))
                         
                     except socket.timeout as e:
                         logging.error("Webocket client couldn't connect, timed out, retrying...")
@@ -1036,18 +1046,19 @@ class AlphaScanDevice:
                     # NOTE: This returns 1D numpy array - NUMPY DOESN'T PLAY NICE WITH JSON!
                     host_timestamp = self.ts.calculate_offset(device_timestamp)
                     self.t_offsets += [[device_timestamp,host_timestamp,local_clock()]]
-                    data_msg = {"TIMESTAMP": host_timestamp[0], "DATA": d[0]}
+                    data_msg = {"TS": host_timestamp[0], "DATA": d[0], "UID":self.ws_uid}
 
                     # Try to send data to server, break after 5 tries
-                    while self.DEV_streamActive.is_set():
+                    while self.DEV_streamActive.is_set() and ws:
                         try:
                             ws.send(json.dumps(data_msg))
                             retries = 0
+                            break
                         except WSClient.WebSocketTimeoutException as e:
                             logging.warning("Sending data to server timed out, retrying...")
                             retries += 1
                         except Exception as e:
-                            logging.critial("Unkown exception occurred when sending:\n\t", str(e))
+                            logging.critical("Unkown exception occurred when sending:\n\t", str(e))
                             retries += 1
                         finally:
                             if retries > 5:

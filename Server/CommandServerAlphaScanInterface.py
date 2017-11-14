@@ -120,13 +120,13 @@ class AscanCommandSender():
             return asyncio.run_coroutine_threadsafe(coroutine, self.this_event_loop)
 #            return self.this_event_loop.run_until_complete(coroutine)
     
-    @validate_json({ "ports":[int], })
-    async def connect(self, ports=[]):
+    @validate_json({ "ports":[int], "stream_router_ip":str, "stream_router_port":str})
+    async def connect(self, ports=[], stream_router_ip=None, stream_router_port=None):
         if self.connected:
             return await self.err_handling.ERR_ALREADY_CONNECTED()
         logging.info("Connecting to " + str(len(ports)) + " AlphaScans on ports: [" + ", ".join([str(p) for p in ports]) + "]...")
 
-        dev_tmp = DeviceCluster(port_list = ports)
+        dev_tmp = DeviceCluster(ports, stream_router_ip, stream_router_port)
         devs_sucessfully_connected = dev_tmp.connect_to_device()
         if all(d for d in devs_sucessfully_connected):
             self.device_cluster = dev_tmp
