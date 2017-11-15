@@ -1046,7 +1046,7 @@ class AlphaScanDevice:
                     # NOTE: This returns 1D numpy array - NUMPY DOESN'T PLAY NICE WITH JSON!
                     host_timestamp = self.ts.calculate_offset(device_timestamp)
                     self.t_offsets += [[device_timestamp,host_timestamp,local_clock()]]
-                    data_msg = {"TS": host_timestamp[0], "DATA": d[0], "UID":self.ws_uid}
+                    data_msg = {"TYPE":"ASCAN", "TS": host_timestamp[0], "DATA": d[0], "UID":self.ws_uid}
 
                     # Try to send data to server, break after 5 tries
                     while self.DEV_streamActive.is_set() and ws:
@@ -1058,7 +1058,7 @@ class AlphaScanDevice:
                             logging.warning("Sending data to server timed out, retrying...")
                             retries += 1
                         except Exception as e:
-                            logging.critical("Unkown exception occurred when sending:\n\t", str(e))
+                            logging.critical("Unkown exception occurred when sending:\n\t" + str(e))
                             retries += 1
                         finally:
                             if retries > 5:
@@ -1078,6 +1078,9 @@ class AlphaScanDevice:
                         time.sleep(0.002) # was 0.004
                     else:
                         time.sleep(0.004) # was 0.004
+            if ws:
+                ws.close()
+            ws = None
 
 
         

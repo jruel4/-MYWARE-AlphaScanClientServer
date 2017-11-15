@@ -46,15 +46,17 @@ def lisp_save_data(ws):
             ws.close()   
 
 def kk():
-    ws = create_connection("ws://127.0.0.1:5678", timeout=1)
+    ws = create_connection("ws://192.168.2.9:50505/Test", timeout=1)
+#    ws = create_connection("ws://127.0.0.1:5678/Test", timeout=1)
     time.sleep(0.1)
     ws.close()
 
 
-ws = create_connection("ws://127.0.0.1:5678", timeout=1)
+ws = create_connection("ws://127.0.0.1:5678/", timeout=1)
+#ws = create_connection("ws://192.168.2.9:5678/", timeout=1)
 thread_targets = [
-        lambda: lisp_save_data(ws),
-#        lambda: gui_print_connections(ws),
+#        lambda: lisp_save_data(ws),
+        lambda: gui_print_connections(ws),
         ]
 
 threads = []

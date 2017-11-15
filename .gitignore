@@ -3,6 +3,7 @@ Device/Data/
 Device/Utilities/cardio_noise_removal/
 AlphaScan_OLD/
 *.xdf
+Data/
 
 
 # Byte-compiled / optimized / DLL files

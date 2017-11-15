@@ -17,6 +17,8 @@ class CommandServer:
     def __init__(self):
         self.ws = None
         self.err_handling = None
+        
+        self.path = None
 
         # This send the actual commands to the AlphaScan and manages multiple devices
         self.ascan_command_sender = None
@@ -49,21 +51,18 @@ class CommandServer:
         '''
         This is functionally our init for the class
         '''
-        logging.info("Receievd connection from: " + self._formatAddress(ws.remote_address))
+        self.path = path
+        logging.info("Receievd connection from: " + self._formatAddress(ws.remote_address) + "\n\tPath: " + str(path))
         
         # Set up error handling etc...
         self.ws = ws
-        self.err_handling = CommandServerResponses(self.ws) # NOTE: The correct ws is pass in to CommErrors in connectionHandler
+        self.err_handling = CommandServerResponses(ws) # NOTE: The correct ws is pass in to CommErrors in connectionHandler
         self.ascan_command_sender = AscanCommandSender(self.err_handling)
         
         # Create command map
         self._createCommandMap()
         
-        #create future object which will be executed
-        command_linstener_task = asyncio.ensure_future(self.commandLinstener(ws))
-    
-        # wait for futures / coroutines to complete
-        done, pending = await asyncio.wait( [command_linstener_task] )
+        return await self.commandLinstener(ws)
 
     async def commandLinstener(self, ws):
         stay_alive = True

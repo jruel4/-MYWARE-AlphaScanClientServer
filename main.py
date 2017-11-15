@@ -62,7 +62,7 @@ commandServer = CommandServer()
 
 # Start up command receiver
 # This starts a websockets server - each new connection instantiates an instance of "handler"
-start_server = websockets.serve(commandServer.connectionHandler, '127.0.0.1', 50505)
+start_server = websockets.serve(commandServer.connectionHandler, '192.168.2.9', 50505)
 
 event_loop = asyncio.get_event_loop()
 try:

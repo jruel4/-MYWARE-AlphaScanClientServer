@@ -58,7 +58,7 @@ import pprint
 class WebsocketsEchoServer:
     def __init__(self):
         self.stay_alive = True
-        
+        self.ascan_err = []
         # We're only going to have one LISP client and one saver client
         self.lisp_client = None
         self.ss_client = None
@@ -92,10 +92,17 @@ class WebsocketsEchoServer:
         self.command_properties = []
         self.gui_properties = []
         self.lisp_properties = []
-        self.saver_properties = []
+        self.ss_properties = []
 
     def _formatAddress(self,add):
         return str(add[0]) + ":" + str(add[1])
+    
+    def _hasCorrectProperties(self, d, properties):
+        for p in properties:
+            if p not in d.keys():
+                logging.error("Did not receive all properties, missing: " + p + ", got: " + str(d.keys()))
+                return False
+        return True
 
     def _generateUID(self):
         uid = np.random.randint(0,1e6)
@@ -160,36 +167,30 @@ class WebsocketsEchoServer:
 #        ---------------------------------
 #        ----- ASCAN
 #        ---------------------------------
-        if "ASCAN" in msg_dict.keys():
+        if "ASCAN" in msg_dict:
+            rxed_properties = msg_dict["ASCAN"]
             # Make sure we have all properties for AlphaScan
-            for p in self.ascan_properties:
-                if p not in msg_dict["ASCAN"].keys():
-                    logging.error("Did not receive all AlphaScan properties, missing: " + p + ", got: " + msg_dict["ASCAN"].keys())
-                    ws.close()
-                    return
+            if not self._hasCorrectProperties(rxed_properties, self.ascan_properties):
+                return ws.close()
             
             # Make sure we haven't already got this AlphaScan
-            for ip,port,_,__ in current_connection["ASCAN"].values():
-                if ip == msg_dict["ASCAN"]["ASCAN_IP"] or port == current_connection["ASCAN"]["ASCAN_PORT"]:
+            for a in current_connection["ASCAN"].values():
+                if a["ASCAN_IP"] == rxed_properties["ASCAN_IP"] or a["ASCAN_PORT"] == current_connection["ASCAN"]["ASCAN_PORT"]:
                     logging.error("Got duplicate AlphaScan connection")
-                    ws.close()
-                    return
+                    return ws.close()
             
             # All tests passed, let's generate a UID for this bitch and get it registered (also msg it back with it's UID)
             uid = self._generateUID()
-            current_connection["ASCAN"].update({uid : {**msg_dict["ASCAN"], **{"WS":ws}} }) # add websocket property to dict
+            current_connection["ASCAN"].update({uid : {**rxed_properties, **{"WS":ws}} }) # add websocket property to dict
             await ws.send(json.dumps({"UID":uid}))
-            
-            #create future object which will be executed and wait for them to complete
-            handler = asyncio.ensure_future(self.ascanConnectionHandler(ws, current_connection_address, uid))
-            done, pending = await asyncio.wait( [handler] )
+            return await self.ascanConnectionHandler(ws, current_connection_address, uid)
 
 
 # =============================================================================
 # #        ---------------------------------
 # #        ----- COMMAND SERVER
 # #        ---------------------------------       
-#         elif "COMMAND" in msg_dict.keys():
+#         elif "COMMAND" in msg_dict:
 #             # Make sure we have all properties for GUI
 #             for p in self.command_properties:
 #                 if p not in msg_dict["COMMAND"].keys():
@@ -214,77 +215,59 @@ class WebsocketsEchoServer:
 #        ---------------------------------
 #        ----- GUI
 #        ---------------------------------       
-        elif "GUI" in msg_dict.keys():
+        elif "GUI" in msg_dict:
+
+            rxed_properties = msg_dict["GUI"]
             # Make sure we have all properties for GUI
-            for p in self.gui_properties:
-                if p not in msg_dict["GUI"].keys():
-                    logging.error("Did not receive all GUI, missing: " + p + ", got: " + msg_dict["GUI"].keys())
-                    ws.close()
-                    return
+            if not self._hasCorrectProperties(rxed_properties, self.gui_properties):
+                return ws.close()
 
             # Make sure we haven't already got this GUI
-            if current_connection["GUI"]:
+            elif current_connection["GUI"]:
                 logging.error("Got duplicate GUI connection")
-                ws.close()
-                return
-            
-            current_connection["GUI"] = ws
-            
-            #create future object which will be executed and wait for them to complete
-            handler = asyncio.ensure_future(self.guiConnectionHandler(ws, current_connection_address))
-            done, pending = await asyncio.wait( [handler] )
+                return ws.close()
+
+            else:
+                current_connection["GUI"] = ws
+                return await self.guiConnectionHandler(ws, current_connection_address)
         
 #        ---------------------------------
 #        ----- LISP
 #        ---------------------------------
-        elif "LISP" in msg_dict.keys():
-            # Make sure we have all properties for LISP server
-            for p in self.lisp_properties:
-                if p not in msg_dict["LISP"].keys():
-                    logging.error("Did not receive all LISP properties, missing: " + p + ", got: " + msg_dict["GUI"].keys())
-                    ws.close()
-                    return
-            
-            if self.lisp_client:
+        elif "LISP" in msg_dict:
+            rxed_properties = msg_dict["LISP"]
+            # Make sure we have all properties for LISP
+            if not self._hasCorrectProperties(rxed_properties, self.lisp_properties):
+                return ws.close()
+            elif self.lisp_client:
                 logging.error("Already have connection to LISP cliet, got duplicate")
-                ws.close()
-                return
-            
-            self.lisp_client = ws
-            
-            #create future object which will be executed and wait for them to complete
-            handler = asyncio.ensure_future(self.lispConnectionHandler(ws))
-            done, pending = await asyncio.wait( [handler] )
+                return ws.close()
+            else:
+                self.lisp_client = ws
+                return await self.lispConnectionHandler(ws)
 
 #        ---------------------------------
 #        ----- STREAM SAVER
 #        ---------------------------------
-        elif "STREAM_SAVER" in msg_dict.keys():
-            # Make sure we have all properties for LISP server
-            for p in self.ss_properties:
-                if p not in msg_dict["STREAM_SAVER"].keys():
-                    logging.error("Did not receive all STREAM_SAVER properties, missing: " + p + ", got: " + msg_dict["GUI"].keys())
-                    ws.close()
-                    return
-            
-            if self.ss_client:
+        elif "STREAM_SAVER" in msg_dict:
+
+            rxed_properties = msg_dict["STREAM_SAVER"]
+            # Make sure we have all properties for Stream Saver
+            if not self._hasCorrectProperties(rxed_properties, self.ss_properties):
+                return ws.close()
+            elif self.ss_client:
                 logging.error("Already have connection to STREAM_SAVER client, got duplicate connection")
-                ws.close()
-                return
-            
-            self.ss_client = ws
-            
-            #create future object which will be executed and wait for them to complete
-            handler = asyncio.ensure_future(self.ssConnectionHandler(ws))
-            done, pending = await asyncio.wait( [handler] )
+                return ws.close()
+            else:
+                self.ss_client = ws
+                return await self.ssConnectionHandler(ws)
 
 #        ---------------------------------
 #        ----- Other / Unknown
 #        ---------------------------------        
         else:
             logging.error("Received unknown connection webserver, got message: " + msg)
-            ws.close()
-            return
+            return ws.close()
             
     async def guiConnectionHandler(self, ws, current_connection_address):
         try:
@@ -292,29 +275,34 @@ class WebsocketsEchoServer:
                 msg, msg_dict = await self._rxJSON(ws, 1)
                 if msg_dict == None:
                     pass
-                elif "CMD_ASCAN" in msg_dict.keys():
+                elif "CMD_ASCAN" in msg_dict:
                     if self.connections[current_connection_address]["COMMAND"]:
                         await self.connections[current_connection_address]["COMMAND"].send(msg)
                     else:
                         logging.warning("Command client at: " + current_connection_address + " not connected")
                         await ws.send(json.dumps({"ERR_NOT_CONNECTED@COMMAND":current_connection_address}))
-                elif "CMD_LISP" in msg_dict.keys() and self.lisp_client:
+                elif "CMD_LISP" in msg_dict and self.lisp_client:
                     if self.lisp_client:
                         await self.lisp_client.send(msg)
                     else:
                         logging.warning("LISP client not connected")
                         await ws.send(json.dumps({"ERR_NOT_CONNECTED@LISP":None}))
-                elif "CMD_STREAM_SAVER" in msg_dict.keys() and self.ss_client:
+                elif "CMD_STREAM_SAVER" in msg_dict and self.ss_client:
                     if self.ss_client:
-                        await self.ss_client.send(msg)
+                        msg_dict.update({"IP":current_connection_address})
+                        await self.ss_client.send(json.dumps(msg_dict))
                     else:
                         logging.warning("Stream saver client not connected")
                         await ws.send(json.dumps({"ERR_NOT_CONNECTED@STREAM_SAVER":None}))
-                elif "CMD_ROUTER" in msg_dict.keys():
+                elif "CMD_ROUTER" in msg_dict:
                     await self.serverMessageParser(ws, msg_dict)
-                elif "DATA_QUIZ" in msg_dict.keys():
-                    if self.lisp_client: await self.lisp_client.send(msg)
-                    if self.ss_client: await self.ss_client.send(msg)
+                elif "DATA_QUIZ" in msg_dict:
+                    msg_dict.update({"IP":current_connection_address})
+                    if self.lisp_client:
+                        await self.lisp_client.send(json.dumps(msg_dict))
+                    if self.ss_client: 
+                        
+                        await self.ss_client.send(json.dumps(msg_dict))
                 else:
                     logging.warning("Got unknown command from GUI, message: " + msg)
         except websockets.exceptions.ConnectionClosed as E:
@@ -331,7 +319,7 @@ class WebsocketsEchoServer:
                 if msg_dict == None:
                     # Couldn't parse JSON or didn't RX any
                     continue
-                elif "RESP_GUI" in msg_dict.keys() and "DESTINATION" in msg_dict.keys():
+                elif "RESP_GUI" in msg_dict and "DESTINATION" in msg_dict:
                     dest = msg_dict["DESTINATION"]
                     if dest in self.connections.keys() and self.connections[dest]["GUI"]:
                         await self.connections[dest]["GUI"].send(msg)
@@ -354,7 +342,7 @@ class WebsocketsEchoServer:
                 if msg_dict == None:
                     # Couldn't parse JSON or didn't RX any
                     continue
-                elif "RESP_GUI" in msg_dict.keys():
+                elif "RESP_GUI" in msg_dict:
                     if self.connections[current_connection_address]["GUI"]:
                         await self.connections[current_connection_address]["GUI"].send(msg)
                 else:
@@ -373,11 +361,12 @@ class WebsocketsEchoServer:
                 if msg_dict == None:
                     # Couldn't parse JSON or didn't RX any
                     pass
-                elif "UID" in msg_dict.keys() and "DATA" in msg_dict.keys() and "TS" in msg_dict.keys():
+                elif "UID" in msg_dict and "DATA" in msg_dict and "TS" in msg_dict:
+                    msg_dict.update({"IP":current_connection_address})
                     if self.ss_client:
-                        await self.ss_client.send(msg) 
+                        await self.ss_client.send(json.dumps(msg_dict))
                     if self.lisp_client:
-                        await self.lisp_client.send(msg) 
+                        await self.lisp_client.send(json.dumps(msg_dict))
                 else:
                     logging.warning("Got unknown message from AlphaScan, message: " + msg)
         except websockets.exceptions.ConnectionClosed as E:
@@ -391,7 +380,7 @@ class WebsocketsEchoServer:
     async def ssConnectionHandler(self, ws):
         try:
             while self.stay_alive:
-                msg = self._rxMessage(ws, 1)
+                msg = await self._rxMessage(ws, 1)
                 if msg == None:
                     # Didn't RX message
                     continue
@@ -407,7 +396,7 @@ class WebsocketsEchoServer:
     
     async def serverMessageParser(self, ws, msg_dict):
         logging.info("Got server command: " + str(msg_dict))
-        if "OPCODE" in msg_dict.keys():
+        if "OPCODE" in msg_dict:
             if msg_dict["OPCODE"] == "LIST_CONN":
                 logging.info("Router connections:\n" + self.pprint.pformat(self.connections))
         

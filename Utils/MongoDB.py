@@ -9,6 +9,7 @@ import pymongo
 import gridfs
 from bson.objectid import ObjectId
 import os
+import logging
 
 class MongoController:
     
@@ -71,8 +72,10 @@ class MongoController:
     '''
 
     def write_streams(self, f_handle, metadata): 
-        print("sending data to mongo")
-        return self.fs.put(f_handle, **metadata)
+        logging.info("Sending data to MongoDB server")
+        r = self.fs.put(f_handle, **metadata)
+        logging.info("Finished sending data")
+        return r
     
     def read_stream(self, object_id, file_to_save_to):
         ret = self.fs.get(ObjectId(object_id)).read()
